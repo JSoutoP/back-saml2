@@ -1,3 +1,30 @@
+export function getSAMLLogout(
+  id: string,
+  issueInstant: string,
+  nameId: string,
+  spNameQualifier: string,
+  issuer: string,
+  reason: string = 'urn:oasis:names:tc:SAML:2.0:logout:user',
+) {
+  const destination =
+    process.env.DESTINATION ||
+    'https://se-pasarela.clave.gob.es/Proxy2/ServiceProvider';
+  // Puedes agregar más variables de entorno si lo necesitas
+  return `
+<saml2p:LogoutRequest xmlns:saml2p="urn:oasis:names:tc:SAML:2.0:protocol"
+                      xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+                      xmlns:eidas="http://eidas.europa.eu/saml-extensions"
+                      xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"
+                      Destination="${destination}"
+                      ID="${id}"
+                      IssueInstant="${issueInstant}"
+                      Reason="${reason}"
+                      Version="2.0">
+  <saml2:Issuer>${issuer}</saml2:Issuer>
+  <saml2:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
+                SPNameQualifier="${spNameQualifier}">${nameId}</saml2:NameID>
+</saml2p:LogoutRequest>`;
+}
 import { create } from 'xmlbuilder2';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -129,6 +156,7 @@ export function getSAMLRequest(
 
 export function signXmlFile(
   xmlString: string,
+  tipo: 'login' | 'logout',
   privateKey2?: string,
   cert?: string,
   uriNode?: string,
@@ -144,19 +172,7 @@ export function signXmlFile(
     publicCert: publicCert,
   });
 
-  // sig.publicCert = fs.readFileSync('public.pem');
-
-  // sig.addReference({
-  //   xpath: '/*',
-  //   transforms: ['http://www.w3.org/2000/09/xmldsig#enveloped-signature'],
-  //   digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha512',
-  //   isEmptyUri: true,
-  // });
-
-  // var sig = new SignedXml({ privateKey: fs.readFileSync('private.pem') });
   sig.addReference({
-    // xpath: "//*[local-name(.)='AuthnRequest']",
-    //   xpath: "//*[local-name(.)='book']",
     xpath: '/*',
     uri: '',
     transforms: [
@@ -168,12 +184,23 @@ export function signXmlFile(
   sig.canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#';
   sig.signatureAlgorithm = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha512';
 
-  sig.computeSignature(xmlString, {
-    location: {
-      reference: "//*[local-name(.)='Extensions']",
-      action: 'before',
-    },
-  });
+  if (tipo === 'login') {
+    sig.computeSignature(xmlString, {
+      location: {
+        reference: "//*[local-name(.)='Extensions']",
+        action: 'before',
+      },
+    });
+  } else if (tipo === 'logout') {
+    sig.computeSignature(xmlString, {
+      location: {
+        reference: "//*[local-name(.)='NameID']",
+        action: 'before',
+      },
+    });
+  } else {
+    sig.computeSignature(xmlString);
+  }
 
   const signedXml = sig.getSignedXml();
   fs.writeFileSync('signed.xml', signedXml);
